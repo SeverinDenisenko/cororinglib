@@ -3,6 +3,7 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
+    // io_uring will not work without this
     "runArgs": [
         "--security-opt",
         "seccomp=unconfined"

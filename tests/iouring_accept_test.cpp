@@ -67,7 +67,7 @@ SIMPLE_TEST(listen_test)
     std::string expected = "Hello, io_uring!";
     std::string message;
     message.resize(expected.size());
-    cororing::buffer buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
+    cororing::buffer_t buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
 
     auto [future2, promise2] = co::create_future_promise<int>();
 

@@ -31,7 +31,7 @@ SIMPLE_TEST(stdout_test)
     cororing::iouring ring(100);
 
     std::string message     = "Hello, io_uring!\n";
-    cororing::buffer buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
+    cororing::buffer_t buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
 
     auto [future, promise] = co::create_future_promise<int>();
 
@@ -53,7 +53,7 @@ SIMPLE_TEST(stdin_test)
     std::string expected = "Hello, io_uring!";
     std::string message;
     message.resize(expected.size());
-    cororing::buffer buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
+    cororing::buffer_t buffer = { reinterpret_cast<std::byte*>(message.data()), message.size() };
 
     auto [future, promise] = co::create_future_promise<int>();
 

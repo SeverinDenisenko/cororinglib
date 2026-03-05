@@ -174,7 +174,7 @@ void iouring::poll()
     process();
 }
 
-void iouring::read(buffer buffer, int client_socket, co::move_only_function<void, int> callback)
+void iouring::read(buffer_t buffer, int client_socket, co::move_only_function<void, int> callback)
 {
     request_t* request = create_request();
 
@@ -192,7 +192,7 @@ void iouring::read(buffer buffer, int client_socket, co::move_only_function<void
     submissions_ += 1;
 }
 
-void iouring::write(buffer buffer, int client_socket, co::move_only_function<void, int> callback)
+void iouring::write(buffer_t buffer, int client_socket, co::move_only_function<void, int> callback)
 {
     request_t* request = create_request();
 

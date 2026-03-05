@@ -4,7 +4,7 @@ add_executable(iouring-accept-test iouring_accept_test.cpp)
 add_test(NAME iouring-stdinout-test COMMAND
     echo "Hello, io_uring!" | ${CMAKE_CURRENT_BINARY_DIR}/iouring-stdinout-test)
 add_test(NAME iouring-accept-test COMMAND
-    bash -c "${CMAKE_CURRENT_BINARY_DIR}/iouring-accept-test & sleep 0.1 && echo \"Hello, io_uring!\" | nc localhost 1234")
+    bash -c "${CMAKE_CURRENT_BINARY_DIR}/iouring-accept-test & sleep 1 && echo \"Hello, io_uring!\" | nc localhost 1234")
 
 target_link_libraries(iouring-stdinout-test unittest cororing)
 target_link_libraries(iouring-accept-test unittest cororing)

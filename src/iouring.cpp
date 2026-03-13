@@ -1,8 +1,12 @@
 #include "iouring.hpp"
+#include "cppcoro/task.hpp"
 
+#include <coroutine>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 
 #include <liburing.h>
 #include <liburing/io_uring.h>
@@ -105,12 +109,14 @@ enum class request_type_t : size_t {
     READ,
     WRITE,
     ACCEPT,
+    CLOSE,
 };
 
 struct iouring::request_t {
     request_type_t type {};
+    int* result {};
+    std::coroutine_handle<> coro {};
     std::array<iovec, 1> iov {};
-    co::move_only_function<void, int> callback {};
 };
 
 iouring::request_t* iouring::create_request()
@@ -131,32 +137,39 @@ void iouring::process()
     }
 }
 
-void iouring::poll()
+bool iouring::poll()
 {
     process();
 
+    struct __kernel_timespec timeout;
+    timeout.tv_sec  = 0;
+    timeout.tv_nsec = 1;
+
     struct io_uring_cqe* completion_queue {};
-    if (io_uring_wait_cqe(ring_.get(), &completion_queue) < 0) {
-        std::abort();
+    int res = io_uring_wait_cqe_timeout(ring_.get(), &completion_queue, &timeout);
+    if (res == -ETIME) {
+        return false;
+    } else if (res < 0) {
+        throw std::runtime_error("io_uring_wait_cqe_timeout");
     }
 
     while (true) {
         request_t* request = (struct request_t*)completion_queue->user_data;
         if (!request) {
-            std::abort();
+            throw std::runtime_error("completion_queue->user_data");
         }
 
         switch (request->type) {
         case request_type_t::READ:
         case request_type_t::WRITE:
         case request_type_t::ACCEPT:
-            if (request->callback) {
-                request->callback(completion_queue->res);
-            }
+        case request_type_t::CLOSE:
+            *request->result = completion_queue->res;
+            request->coro.resume();
             delete_request(request);
             break;
         default:
-            std::abort();
+            throw std::runtime_error("request->type");
             break;
         }
 
@@ -172,16 +185,19 @@ void iouring::poll()
     }
 
     process();
+
+    return true;
 }
 
-void iouring::read(buffer_t buffer, int client_socket, co::move_only_function<void, int> callback)
+void iouring::read(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
     request->iov[0].iov_base = buffer.data();
     request->iov[0].iov_len  = buffer.size();
     request->type            = request_type_t::READ;
-    request->callback        = std::move(callback);
+    request->coro            = coro;
+    request->result          = result;
 
     std::memset(request->iov[0].iov_base, 0, request->iov[0].iov_len);
 
@@ -192,14 +208,15 @@ void iouring::read(buffer_t buffer, int client_socket, co::move_only_function<vo
     submissions_ += 1;
 }
 
-void iouring::write(buffer_t buffer, int client_socket, co::move_only_function<void, int> callback)
+void iouring::write(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
     request->iov[0].iov_base = buffer.data();
     request->iov[0].iov_len  = buffer.size();
     request->type            = request_type_t::WRITE;
-    request->callback        = std::move(callback);
+    request->coro            = coro;
+    request->result          = result;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
     io_uring_prep_writev(sqe, client_socket, request->iov.data(), request->iov.size(), 0);
@@ -208,18 +225,178 @@ void iouring::write(buffer_t buffer, int client_socket, co::move_only_function<v
     submissions_ += 1;
 }
 
-void iouring::accept(int listen_socket, co::move_only_function<void, int> callback)
+void iouring::accept(int listen_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
-    request->type      = request_type_t::ACCEPT;
-    request->callback  = std::move(callback);
+
+    request->iov[0].iov_base = 0;
+    request->iov[0].iov_len  = 0;
+    request->type            = request_type_t::ACCEPT;
+    request->coro            = coro;
+    request->result          = result;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-
     io_uring_prep_accept(sqe, listen_socket, nullptr, nullptr, 0);
     io_uring_sqe_set_data(sqe, request);
 
     submissions_ += 1;
+}
+
+void iouring::close(int client_socket, std::coroutine_handle<> coro, int* result)
+{
+    request_t* request = create_request();
+
+    request->iov[0].iov_base = 0;
+    request->iov[0].iov_len  = 0;
+    request->type            = request_type_t::CLOSE;
+    request->coro            = coro;
+    request->result          = result;
+
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
+    io_uring_prep_close(sqe, client_socket);
+    io_uring_sqe_set_data(sqe, request);
+
+    submissions_ += 1;
+}
+
+cppcoro::task<int> iouring::read(buffer_t buffer, int client_socket)
+{
+    class awaiter {
+    public:
+        awaiter(iouring& ring, buffer_t buffer, int client_socket)
+            : ring_(ring)
+            , buffer_(std::move(buffer))
+            , client_socket_(client_socket)
+        {
+        }
+
+        bool await_ready()
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) noexcept
+        {
+            ring_.read(buffer_, client_socket_, handle, &value_);
+        }
+
+        int await_resume()
+        {
+            return value_;
+        }
+
+    private:
+        iouring& ring_;
+        buffer_t buffer_;
+        int client_socket_;
+        int value_ {};
+    };
+
+    co_return co_await awaiter { *this, buffer, client_socket };
+}
+
+cppcoro::task<int> iouring::write(buffer_t buffer, int client_socket)
+{
+    class awaiter {
+    public:
+        awaiter(iouring& ring, buffer_t buffer, int client_socket)
+            : ring_(ring)
+            , buffer_(std::move(buffer))
+            , client_socket_(client_socket)
+        {
+        }
+
+        bool await_ready()
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) noexcept
+        {
+            ring_.write(buffer_, client_socket_, handle, &value_);
+        }
+
+        int await_resume()
+        {
+            return value_;
+        }
+
+    private:
+        iouring& ring_;
+        buffer_t buffer_;
+        int client_socket_;
+        int value_ {};
+    };
+
+    co_return co_await awaiter { *this, buffer, client_socket };
+}
+
+cppcoro::task<int> iouring::accept(int listen_socket)
+{
+    class awaiter {
+    public:
+        awaiter(iouring& ring, int listen_socket)
+            : ring_(ring)
+            , listen_socket_(listen_socket)
+        {
+        }
+
+        bool await_ready()
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) noexcept
+        {
+            ring_.accept(listen_socket_, handle, &value_);
+        }
+
+        int await_resume()
+        {
+            return value_;
+        }
+
+    private:
+        iouring& ring_;
+        int listen_socket_;
+        int value_ {};
+    };
+
+    co_return co_await awaiter { *this, listen_socket };
+}
+
+cppcoro::task<int> iouring::close(int client_socket)
+{
+    class awaiter {
+    public:
+        awaiter(iouring& ring, int client_socket)
+            : ring_(ring)
+            , client_socket_(client_socket)
+        {
+        }
+
+        bool await_ready()
+        {
+            return false;
+        }
+
+        void await_suspend(std::coroutine_handle<> handle) noexcept
+        {
+            ring_.close(client_socket_, handle, &value_);
+        }
+
+        int await_resume()
+        {
+            return value_;
+        }
+
+    private:
+        iouring& ring_;
+        int client_socket_;
+        int value_ {};
+    };
+
+    co_return co_await awaiter { *this, client_socket };
 }
 
 }

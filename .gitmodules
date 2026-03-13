@@ -1,6 +1,6 @@
-[submodule "submodules/cooperativelib"]
-	path = submodules/cooperativelib
-	url = https://github.com/SeverinDenisenko/cooperativelib.git
 [submodule "submodules/unittestlib"]
 	path = submodules/unittestlib
 	url = https://github.com/SeverinDenisenko/unittestlib
+[submodule "submodules/andreasbuhr-cppcoro"]
+	path = submodules/andreasbuhr-cppcoro
+	url = https://github.com/hghpublic/andreasbuhr-cppcoro.git

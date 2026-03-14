@@ -2,28 +2,35 @@
 
 #include "cppcoro/task.hpp"
 
+#include "buffer.hpp"
+
 #include <coroutine>
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <vector>
 
 struct io_uring;
 
 namespace cororing {
 
-using buffer_t = std::span<std::byte>;
+bool is_io_uring_supported();
+std::vector<const char*> get_capabilities();
 
-std::vector<std::string> get_capabilities();
-
-class iouring {
+class ring_t {
 public:
-    iouring(size_t queue_size);
-    ~iouring();
+    ring_t(size_t queue_size);
+    ~ring_t();
+
+    ring_t(const ring_t& other)            = delete;
+    ring_t& operator=(const ring_t& other) = delete;
+
+    ring_t(ring_t&& other)            = default;
+    ring_t& operator=(ring_t&& other) = default;
 
     bool poll();
 
     cppcoro::task<int> read(buffer_t buffer, int client_socket);
+    cppcoro::task<int> read_until_full(buffer_t buffer, int client_socket);
     cppcoro::task<int> write(buffer_t buffer, int client_socket);
     cppcoro::task<int> accept(int listen_socket);
     cppcoro::task<int> close(int client_socket);

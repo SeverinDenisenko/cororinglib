@@ -1,8 +1,10 @@
-#include "iouring.hpp"
+#include "ring.hpp"
 #include "cppcoro/task.hpp"
 
+#include <array>
 #include <coroutine>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -67,9 +69,9 @@ static const char* g_io_uring_op[] = {
 
 static constexpr size_t g_io_uring_ops = 49;
 
-std::vector<std::string> get_capabilities()
+std::vector<const char*> get_capabilities()
 {
-    std::vector<std::string> result {};
+    std::vector<const char*> result {};
 
     struct io_uring_probe* probe = io_uring_get_probe();
 
@@ -90,7 +92,20 @@ std::vector<std::string> get_capabilities()
     return result;
 }
 
-iouring::iouring(size_t queue_size)
+bool is_io_uring_supported()
+{
+    struct io_uring_probe* probe = io_uring_get_probe();
+
+    if (!probe) {
+        return false;
+    } else {
+        io_uring_free_probe(probe);
+
+        return true;
+    }
+}
+
+ring_t::ring_t(size_t queue_size)
     : ring_(std::make_unique<struct io_uring>())
     , queue_size_(queue_size)
     , submissions_(0)
@@ -100,7 +115,7 @@ iouring::iouring(size_t queue_size)
     }
 }
 
-iouring::~iouring()
+ring_t::~ring_t()
 {
     io_uring_queue_exit(ring_.get());
 }
@@ -112,24 +127,24 @@ enum class request_type_t : size_t {
     CLOSE,
 };
 
-struct iouring::request_t {
+struct ring_t::request_t {
     request_type_t type {};
     int* result {};
     std::coroutine_handle<> coro {};
     std::array<iovec, 1> iov {};
 };
 
-iouring::request_t* iouring::create_request()
+ring_t::request_t* ring_t::create_request()
 {
     return new request_t {};
 }
 
-void iouring::delete_request(iouring::request_t* request)
+void ring_t::delete_request(ring_t::request_t* request)
 {
     delete request;
 }
 
-void iouring::process()
+void ring_t::process()
 {
     if (submissions_ > 0) {
         io_uring_submit(ring_.get());
@@ -137,7 +152,7 @@ void iouring::process()
     }
 }
 
-bool iouring::poll()
+bool ring_t::poll()
 {
     process();
 
@@ -189,7 +204,7 @@ bool iouring::poll()
     return true;
 }
 
-void iouring::read(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::read(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -208,7 +223,7 @@ void iouring::read(buffer_t buffer, int client_socket, std::coroutine_handle<> c
     submissions_ += 1;
 }
 
-void iouring::write(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::write(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -225,7 +240,7 @@ void iouring::write(buffer_t buffer, int client_socket, std::coroutine_handle<> 
     submissions_ += 1;
 }
 
-void iouring::accept(int listen_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::accept(int listen_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -242,7 +257,7 @@ void iouring::accept(int listen_socket, std::coroutine_handle<> coro, int* resul
     submissions_ += 1;
 }
 
-void iouring::close(int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::close(int client_socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -259,11 +274,11 @@ void iouring::close(int client_socket, std::coroutine_handle<> coro, int* result
     submissions_ += 1;
 }
 
-cppcoro::task<int> iouring::read(buffer_t buffer, int client_socket)
+cppcoro::task<int> ring_t::read(buffer_t buffer, int client_socket)
 {
     class awaiter {
     public:
-        awaiter(iouring& ring, buffer_t buffer, int client_socket)
+        awaiter(ring_t& ring, buffer_t buffer, int client_socket)
             : ring_(ring)
             , buffer_(std::move(buffer))
             , client_socket_(client_socket)
@@ -286,7 +301,7 @@ cppcoro::task<int> iouring::read(buffer_t buffer, int client_socket)
         }
 
     private:
-        iouring& ring_;
+        ring_t& ring_;
         buffer_t buffer_;
         int client_socket_;
         int value_ {};
@@ -295,11 +310,29 @@ cppcoro::task<int> iouring::read(buffer_t buffer, int client_socket)
     co_return co_await awaiter { *this, buffer, client_socket };
 }
 
-cppcoro::task<int> iouring::write(buffer_t buffer, int client_socket)
+cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int client_socket)
+{
+    size_t read = 0;
+
+    while (read < buffer.size()) {
+        buffer_t left(buffer.data() + read, buffer.size() - read);
+        int res = co_await this->read(left, client_socket);
+
+        if (res <= 0) {
+            co_return res;
+        }
+
+        read += res;
+    }
+
+    co_return read;
+}
+
+cppcoro::task<int> ring_t::write(buffer_t buffer, int client_socket)
 {
     class awaiter {
     public:
-        awaiter(iouring& ring, buffer_t buffer, int client_socket)
+        awaiter(ring_t& ring, buffer_t buffer, int client_socket)
             : ring_(ring)
             , buffer_(std::move(buffer))
             , client_socket_(client_socket)
@@ -322,7 +355,7 @@ cppcoro::task<int> iouring::write(buffer_t buffer, int client_socket)
         }
 
     private:
-        iouring& ring_;
+        ring_t& ring_;
         buffer_t buffer_;
         int client_socket_;
         int value_ {};
@@ -331,11 +364,11 @@ cppcoro::task<int> iouring::write(buffer_t buffer, int client_socket)
     co_return co_await awaiter { *this, buffer, client_socket };
 }
 
-cppcoro::task<int> iouring::accept(int listen_socket)
+cppcoro::task<int> ring_t::accept(int listen_socket)
 {
     class awaiter {
     public:
-        awaiter(iouring& ring, int listen_socket)
+        awaiter(ring_t& ring, int listen_socket)
             : ring_(ring)
             , listen_socket_(listen_socket)
         {
@@ -357,7 +390,7 @@ cppcoro::task<int> iouring::accept(int listen_socket)
         }
 
     private:
-        iouring& ring_;
+        ring_t& ring_;
         int listen_socket_;
         int value_ {};
     };
@@ -365,11 +398,11 @@ cppcoro::task<int> iouring::accept(int listen_socket)
     co_return co_await awaiter { *this, listen_socket };
 }
 
-cppcoro::task<int> iouring::close(int client_socket)
+cppcoro::task<int> ring_t::close(int client_socket)
 {
     class awaiter {
     public:
-        awaiter(iouring& ring, int client_socket)
+        awaiter(ring_t& ring, int client_socket)
             : ring_(ring)
             , client_socket_(client_socket)
         {
@@ -391,7 +424,7 @@ cppcoro::task<int> iouring::close(int client_socket)
         }
 
     private:
-        iouring& ring_;
+        ring_t& ring_;
         int client_socket_;
         int value_ {};
     };

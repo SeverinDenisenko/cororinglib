@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -36,6 +37,15 @@ namespace {
         if (domain == AF_INET6) {
             int ipv6_only = 1;
             int rc        = setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &ipv6_only, sizeof(ipv6_only));
+            if (rc < 0) {
+                close(sock);
+                throw_error_code(rc);
+            }
+        }
+
+        if (type == SOCK_STREAM) {
+            int flag = 1;
+            int rc   = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
             if (rc < 0) {
                 close(sock);
                 throw_error_code(rc);

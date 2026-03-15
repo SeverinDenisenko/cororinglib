@@ -1,5 +1,5 @@
-#include "ring.hpp"
-#include "sockets.hpp"
+#include "cororing/ring.hpp"
+#include "cororing/sockets.hpp"
 #include "unittest.hpp"
 
 #include "cppcoro/sync_wait.hpp"

@@ -1,0 +1,5 @@
+OUTPUT_DIRECTORY = @CMAKE_CURRENT_BINARY_DIR@/doxygen/
+INPUT            = @CMAKE_CURRENT_SOURCE_DIR@/include/cororing/ @CMAKE_CURRENT_SOURCE_DIR@/docs
+FULL_PATH_NAMES  = NO
+PROJECT_NAME     = "Cororing"
+PROJECT_BRIEF    = "io_uring with C++ coroutines"

@@ -1,8 +1,10 @@
-#include "buffer.hpp"
-#include "ring.hpp"
-#include "sockets.hpp"
+#include "cororing/buffer.hpp"
+#include "cororing/perftools.hpp"
+#include "cororing/ring.hpp"
+#include "cororing/sockets.hpp"
 
 #include <iostream>
+#include <ostream>
 #include <random>
 
 #include "cppcoro/sync_wait.hpp"
@@ -32,12 +34,16 @@ cppcoro::task<void> spam_strings(cororing::ring_t& ring)
 
     size_t requests = 1000;
 
+    cororing::perf_sampler sampler {};
+
     for (size_t n = 0; n < requests; ++n) {
-        size_t len = 150;
+        size_t len = 1024;
 
         std::string request = random_string(len);
         std::string response;
         response.resize(len);
+
+        sampler.begin_sample();
 
         int res = co_await ring.write(cororing::buffer_t(request), socket);
 
@@ -53,6 +59,8 @@ cppcoro::task<void> spam_strings(cororing::ring_t& ring)
             co_return;
         }
 
+        sampler.end_sample();
+
         response.resize(res);
 
         if (request != response) {
@@ -61,7 +69,13 @@ cppcoro::task<void> spam_strings(cororing::ring_t& ring)
         }
     }
 
-    std::cout << "Finished" << std::endl;
+    co_await ring.close(socket);
+
+    std::cout << "Finished: " << std::endl;
+    std::cout << "Min: " << sampler.get_min() << std::endl;
+    std::cout << "Max: " << sampler.get_max() << std::endl;
+    std::cout << "Avg: " << sampler.get_mean() << std::endl;
+    std::cout << "Std: " << sampler.get_std() << std::endl;
 }
 
 cppcoro::task<void> poller(cororing::ring_t& ring)

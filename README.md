@@ -1,1 +1,3 @@
-# Coroutines and io_uring bundle
+# Coroutine interface for io_uring
+
+High performance IO for everyone!

@@ -1,5 +1,4 @@
-#include "ring.hpp"
-#include "cppcoro/task.hpp"
+#include "cororing/ring.hpp"
 
 #include <array>
 #include <coroutine>
@@ -105,9 +104,10 @@ bool is_io_uring_supported()
     }
 }
 
-ring_t::ring_t(size_t queue_size)
+ring_t::ring_t(size_t queue_size, size_t queue_min_space_left)
     : ring_(std::make_unique<struct io_uring>())
     , queue_size_(queue_size)
+    , queue_min_space_left_(queue_min_space_left)
     , submissions_(0)
 {
     if (io_uring_queue_init(queue_size_, ring_.get(), 0) < 0) {
@@ -190,7 +190,7 @@ bool ring_t::poll()
 
         io_uring_cqe_seen(ring_.get(), completion_queue);
 
-        if (io_uring_sq_space_left(ring_.get()) < queue_size_ / 2) {
+        if (io_uring_sq_space_left(ring_.get()) <= queue_min_space_left_) {
             break; // the submission queue is full
         }
 
@@ -204,7 +204,7 @@ bool ring_t::poll()
     return true;
 }
 
-void ring_t::read(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::read(buffer_t buffer, int fd, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -217,13 +217,13 @@ void ring_t::read(buffer_t buffer, int client_socket, std::coroutine_handle<> co
     std::memset(request->iov[0].iov_base, 0, request->iov[0].iov_len);
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_readv(sqe, client_socket, request->iov.data(), request->iov.size(), 0);
+    io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), 0);
     io_uring_sqe_set_data(sqe, request);
 
     submissions_ += 1;
 }
 
-void ring_t::write(buffer_t buffer, int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::write(buffer_t buffer, int fd, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -234,13 +234,13 @@ void ring_t::write(buffer_t buffer, int client_socket, std::coroutine_handle<> c
     request->result          = result;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_writev(sqe, client_socket, request->iov.data(), request->iov.size(), 0);
+    io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), 0);
     io_uring_sqe_set_data(sqe, request);
 
     submissions_ += 1;
 }
 
-void ring_t::accept(int listen_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::accept(int socket, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -251,13 +251,13 @@ void ring_t::accept(int listen_socket, std::coroutine_handle<> coro, int* result
     request->result          = result;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_accept(sqe, listen_socket, nullptr, nullptr, 0);
+    io_uring_prep_accept(sqe, socket, nullptr, nullptr, 0);
     io_uring_sqe_set_data(sqe, request);
 
     submissions_ += 1;
 }
 
-void ring_t::close(int client_socket, std::coroutine_handle<> coro, int* result)
+void ring_t::close(int fd, std::coroutine_handle<> coro, int* result)
 {
     request_t* request = create_request();
 
@@ -268,20 +268,20 @@ void ring_t::close(int client_socket, std::coroutine_handle<> coro, int* result)
     request->result          = result;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_close(sqe, client_socket);
+    io_uring_prep_close(sqe, fd);
     io_uring_sqe_set_data(sqe, request);
 
     submissions_ += 1;
 }
 
-cppcoro::task<int> ring_t::read(buffer_t buffer, int client_socket)
+cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
 {
     class awaiter {
     public:
-        awaiter(ring_t& ring, buffer_t buffer, int client_socket)
+        awaiter(ring_t& ring, buffer_t buffer, int fd)
             : ring_(ring)
             , buffer_(std::move(buffer))
-            , client_socket_(client_socket)
+            , client_socket_(fd)
         {
         }
 
@@ -307,16 +307,16 @@ cppcoro::task<int> ring_t::read(buffer_t buffer, int client_socket)
         int value_ {};
     };
 
-    co_return co_await awaiter { *this, buffer, client_socket };
+    co_return co_await awaiter { *this, buffer, fd };
 }
 
-cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int client_socket)
+cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int fd)
 {
     size_t read = 0;
 
     while (read < buffer.size()) {
         buffer_t left(buffer.data() + read, buffer.size() - read);
-        int res = co_await this->read(left, client_socket);
+        int res = co_await this->read(left, fd);
 
         if (res <= 0) {
             co_return res;
@@ -328,14 +328,14 @@ cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int client_socket)
     co_return read;
 }
 
-cppcoro::task<int> ring_t::write(buffer_t buffer, int client_socket)
+cppcoro::task<int> ring_t::write(buffer_t buffer, int fd)
 {
     class awaiter {
     public:
-        awaiter(ring_t& ring, buffer_t buffer, int client_socket)
+        awaiter(ring_t& ring, buffer_t buffer, int fd)
             : ring_(ring)
             , buffer_(std::move(buffer))
-            , client_socket_(client_socket)
+            , client_socket_(fd)
         {
         }
 
@@ -361,16 +361,16 @@ cppcoro::task<int> ring_t::write(buffer_t buffer, int client_socket)
         int value_ {};
     };
 
-    co_return co_await awaiter { *this, buffer, client_socket };
+    co_return co_await awaiter { *this, buffer, fd };
 }
 
-cppcoro::task<int> ring_t::accept(int listen_socket)
+cppcoro::task<int> ring_t::accept(int socket)
 {
     class awaiter {
     public:
-        awaiter(ring_t& ring, int listen_socket)
+        awaiter(ring_t& ring, int socket)
             : ring_(ring)
-            , listen_socket_(listen_socket)
+            , listen_socket_(socket)
         {
         }
 
@@ -395,16 +395,16 @@ cppcoro::task<int> ring_t::accept(int listen_socket)
         int value_ {};
     };
 
-    co_return co_await awaiter { *this, listen_socket };
+    co_return co_await awaiter { *this, socket };
 }
 
-cppcoro::task<int> ring_t::close(int client_socket)
+cppcoro::task<int> ring_t::close(int fd)
 {
     class awaiter {
     public:
-        awaiter(ring_t& ring, int client_socket)
+        awaiter(ring_t& ring, int fd)
             : ring_(ring)
-            , client_socket_(client_socket)
+            , client_socket_(fd)
         {
         }
 
@@ -429,7 +429,7 @@ cppcoro::task<int> ring_t::close(int client_socket)
         int value_ {};
     };
 
-    co_return co_await awaiter { *this, client_socket };
+    co_return co_await awaiter { *this, fd };
 }
 
 }

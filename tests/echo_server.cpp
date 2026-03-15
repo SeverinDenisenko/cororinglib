@@ -1,5 +1,5 @@
-#include "ring.hpp"
-#include "sockets.hpp"
+#include "cororing/ring.hpp"
+#include "cororing/sockets.hpp"
 
 #include <iostream>
 #include <vector>
@@ -25,6 +25,9 @@ cppcoro::task<void> handle_connection(cororing::ring_t& ring, int client_socket)
 
         if (len == 0) {
             std::cout << "Client disconnected." << std::endl;
+
+            co_await ring.close(client_socket);
+
             co_return;
         }
 

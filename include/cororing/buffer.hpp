@@ -3,12 +3,13 @@
 #include <cstddef>
 #include <type_traits>
 
+/** @file */
+
 namespace cororing {
 
-/*
-    Non-owning pointer and size wrapper with usefull constructors defined
-*/
-
+/**
+ * @brief  Non-owning pointer and size wrapper with usefull constructors defined
+ */
 class buffer_t {
 public:
     template <typename T>

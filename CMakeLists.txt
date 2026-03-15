@@ -11,12 +11,13 @@ option(DISABLE_SANITIZERS OFF)
 option(ENABLE_ASAN OFF)
 option(ENABLE_UBSAN OFF)
 option(ENABLE_TSAN OFF)
+option(BUILD_DOCS "Build documentation" OFF)
 
 set(PROJECT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/submodules/andreasbuhr-cppcoro)
 
-add_library(cororing STATIC src/ring.cpp src/sockets.cpp)
+add_library(cororing STATIC src/ring.cpp src/sockets.cpp src/perftools.cpp)
 
 target_include_directories(cororing PUBLIC ${PROJECT_INCLUDE_DIR})
 
@@ -43,4 +44,21 @@ if (ENABLE_TESTING AND PROJECT_IS_TOP_LEVEL)
     enable_testing()
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/submodules/unittestlib)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tests)
+endif()
+
+if(BUILD_DOCS)
+    find_package(Doxygen)
+
+    set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.in)
+    set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+
+    configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+    message("Doxygen build started")
+
+    add_custom_target(doxygen ALL
+        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Generating API documentation with Doxygen"
+        VERBATIM)
+
 endif()

@@ -1,3 +1,4 @@
+#include "cororing/buffer.hpp"
 #include "cororing/ring.hpp"
 #include "cororing/sockets.hpp"
 
@@ -31,7 +32,7 @@ cppcoro::task<void> handle_connection(cororing::ring_t& ring, int client_socket)
             co_return;
         }
 
-        len = co_await ring.write(cororing::buffer_t(buffer.data(), len), client_socket);
+        len = co_await ring.write(cororing::const_buffer_t(buffer.data(), len), client_socket);
 
         if (len <= 0) {
             std::cout << "Can't write to client." << std::endl;

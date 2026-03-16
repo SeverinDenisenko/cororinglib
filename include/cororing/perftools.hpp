@@ -16,6 +16,7 @@ public:
     using clock      = std::chrono::high_resolution_clock;
     using duration   = clock::duration;
     using time_point = clock::time_point;
+    using rep        = duration::rep;
 
     /**
      * @brief Mark begin of the meshured section
@@ -29,28 +30,28 @@ public:
 
     /**
      * @brief Get the minumum latency
-     * 
+     *
      * @return duration Minumum latency.
      */
     duration get_min() const;
 
     /**
      * @brief Get the maximum latency
-     * 
+     *
      * @return duration Maximum latency.
      */
     duration get_max() const;
 
     /**
      * @brief Get the mean for latency
-     * 
+     *
      * @return duration Latency.
      */
     duration get_mean() const;
 
     /**
      * @brief Get standart deviation for latency
-     * 
+     *
      * @return duration Standart deviation.
      */
     duration get_std() const;
@@ -58,10 +59,10 @@ public:
 private:
     time_point last_ {};
     size_t samples_ {};
-    duration::rep sum_ {};
-    duration::rep sum_squares_ {};
-    duration min_ { std::numeric_limits<duration>::max() };
-    duration max_ { std::numeric_limits<duration>::min() };
+    rep sum_ {};
+    rep sum_squares_ {};
+    rep min_ { std::numeric_limits<rep>::max() };
+    rep max_ { std::numeric_limits<rep>::min() };
 };
 
 }

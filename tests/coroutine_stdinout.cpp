@@ -19,7 +19,7 @@ cppcoro::task<void> read_from_stdin(cororing::ring_t& ring, size_t max_size)
 
 cppcoro::task<void> write_to_stdout(cororing::ring_t& ring, std::string message)
 {
-    int size = co_await ring.write(cororing::buffer_t(message), STDOUT_FILENO);
+    int size = co_await ring.write(cororing::const_buffer_t(message), STDOUT_FILENO);
 
     ASSERT_TRUE(size > 0);
 }

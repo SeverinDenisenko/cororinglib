@@ -27,36 +27,33 @@ std::string random_string(std::size_t length)
     return result;
 }
 
-cppcoro::task<void> spam_strings(cororing::ring_t& ring)
+cppcoro::task<cororing::perf_sampler> spam_strings(cororing::ring_t& ring, size_t requests, size_t request_size)
 {
     int socket = cororing::create_client_socket(
         cororing::socket_protocol_t::tcp, cororing::socket_ip_version_t::ipv4, g_port, "127.0.0.1");
 
-    size_t requests = 1000;
-
     cororing::perf_sampler sampler {};
 
     for (size_t n = 0; n < requests; ++n) {
-        size_t len = 1024;
+        std::string request = random_string(request_size);
 
-        std::string request = random_string(len);
         std::string response;
-        response.resize(len);
+        response.resize(request_size);
 
         sampler.begin_sample();
 
-        int res = co_await ring.write(cororing::buffer_t(request), socket);
+        int res = co_await ring.write(cororing::const_buffer_t(request), socket);
 
         if (res <= 0) {
             std::cout << "Can't write" << std::endl;
-            co_return;
+            break;
         }
 
         res = co_await ring.read_until_full(cororing::buffer_t(response), socket);
 
         if (res <= 0) {
             std::cout << "Can't read" << std::endl;
-            co_return;
+            break;
         }
 
         sampler.end_sample();
@@ -65,17 +62,29 @@ cppcoro::task<void> spam_strings(cororing::ring_t& ring)
 
         if (request != response) {
             std::cout << "Read garbage" << std::endl;
-            co_return;
+            break;
         }
     }
 
     co_await ring.close(socket);
 
-    std::cout << "Finished: " << std::endl;
-    std::cout << "Min: " << sampler.get_min() << std::endl;
-    std::cout << "Max: " << sampler.get_max() << std::endl;
-    std::cout << "Avg: " << sampler.get_mean() << std::endl;
-    std::cout << "Std: " << sampler.get_std() << std::endl;
+    co_return sampler;
+}
+
+cppcoro::task<void> client(cororing::ring_t& ring)
+{
+    size_t request_size = 1024 * 1024;
+    size_t requests     = 10;
+
+    while (true) {
+        cororing::perf_sampler sampler = co_await spam_strings(ring, requests, request_size);
+
+        std::cout << "Finished " << requests << " requests of size " << request_size << ": " << std::endl;
+        std::cout << "Min: " << sampler.get_min() << std::endl;
+        std::cout << "Max: " << sampler.get_max() << std::endl;
+        std::cout << "Avg: " << sampler.get_mean() << std::endl;
+        std::cout << "Std: " << sampler.get_std() << std::endl;
+    }
 }
 
 cppcoro::task<void> poller(cororing::ring_t& ring)
@@ -90,7 +99,7 @@ int main()
 {
     cororing::ring_t ring(100);
 
-    cppcoro::sync_wait(cppcoro::when_all_ready(spam_strings(ring), poller(ring)));
+    cppcoro::sync_wait(cppcoro::when_all_ready(client(ring), poller(ring)));
 
     return 0;
 }

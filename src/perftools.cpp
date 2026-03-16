@@ -13,8 +13,8 @@ void perf_sampler::end_sample()
 {
     duration dt = clock::now() - last_;
 
-    min_ = std::min(dt, min_);
-    max_ = std::max(dt, max_);
+    min_ = std::min(dt.count(), min_);
+    max_ = std::max(dt.count(), max_);
 
     samples_ += 1;
     sum_ += dt.count();
@@ -23,12 +23,12 @@ void perf_sampler::end_sample()
 
 perf_sampler::duration perf_sampler::get_min() const
 {
-    return min_;
+    return duration(min_);
 }
 
 perf_sampler::duration perf_sampler::get_max() const
 {
-    return max_;
+    return duration(max_);
 }
 
 perf_sampler::duration perf_sampler::get_mean() const

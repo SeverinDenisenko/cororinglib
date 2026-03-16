@@ -4,7 +4,6 @@
 
 #include "cororing/buffer.hpp"
 
-#include <coroutine>
 #include <cstddef>
 #include <memory>
 #include <vector>
@@ -19,14 +18,14 @@ namespace cororing {
  * @brief
  *
  * @return true if io_uring supported and enabled on current platform
- * @return false if error was encounteded diring looking for io_uring
+ * @return false if error was encountered during looking for io_uring
  */
 bool is_io_uring_supported();
 
 /**
  * @brief Get the io_uring capabilities on the current platform
  *
- * @return std::vector<const char*> Vector of named capabilities. If error was encounteded during lookup, returns empty
+ * @return std::vector<const char*> Vector of named capabilities. If error was encountered during lookup, returns empty
  * vector.
  */
 std::vector<const char*> get_capabilities();
@@ -39,9 +38,9 @@ public:
     /**
      * @brief Construct a new ring object
      *
-     * @param queue_size Length of sumbition and completion queues. Must be bigger then 0.
-     * @param queue_min_space_left Minimum amount of submition queue free space while processing completion queue.
-     * Default is 0 (completion queue will be drainded until submition queue will be completly full). Must be smaller
+     * @param queue_size Length of submission and completion queues. Must be bigger then 0.
+     * @param queue_min_space_left Minimum amount of submission queue free space while processing completion queue.
+     * Default is 0 (completion queue will be drained until submission queue will be completely full). Must be smaller
      * then queue_size.
      */
     ring_t(size_t queue_size, size_t queue_min_space_left = 0);
@@ -54,7 +53,7 @@ public:
     ring_t& operator=(ring_t&& other) = default;
 
     /**
-     * @brief Read events from completion queue and resume all coroutines awaiting responces
+     * @brief Read events from completion queue and resume all coroutines awaiting responses
      *
      * @return true if completion queue had events
      * @return false if completion queue was empty
@@ -66,12 +65,12 @@ public:
      *
      * @param buffer Non-owning reference to data
      * @param fd Valid file descriptor
-     * @return cppcoro::task<int> Task yelding amount of bytes read if > 0 or error code if < 0
+     * @return cppcoro::task<int> Task yielding amount of bytes read if > 0 or error code if < 0
      */
     cppcoro::task<int> read(buffer_t buffer, int fd);
 
     /**
-     * @brief Read exacly buffer.size() bytes from file descriptor
+     * @brief Read exactly buffer.size() bytes from file descriptor
      *
      * @param buffer Non-owning reference to data
      * @param fd Valid file descriptor
@@ -86,7 +85,7 @@ public:
      * @param fd Valid file descriptor
      * @return cppcoro::task<int> Task yielding amount of bytes written if > 0 or error code if < 0
      */
-    cppcoro::task<int> write(buffer_t buffer, int fd);
+    cppcoro::task<int> write(const_buffer_t buffer, int fd);
 
     /**
      * @brief Accept connection on socket
@@ -105,17 +104,7 @@ public:
     cppcoro::task<int> close(int fd);
 
 private:
-    struct request_t;
-
-    request_t* create_request();
-    void delete_request(request_t* request);
-
     void process();
-
-    void read(buffer_t buffer, int fd, std::coroutine_handle<> coro, int* result);
-    void write(buffer_t buffer, int fd, std::coroutine_handle<> coro, int* result);
-    void accept(int socket, std::coroutine_handle<> coro, int* result);
-    void close(int fd, std::coroutine_handle<> coro, int* result);
 
     std::unique_ptr<struct io_uring> ring_ { nullptr };
     size_t queue_size_ {};

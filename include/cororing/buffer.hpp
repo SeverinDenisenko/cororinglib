@@ -1,11 +1,17 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 /** @file */
 
 namespace cororing {
+
+template <class T>
+concept is_byte = std::is_same_v<std::remove_cv_t<T>, std::byte> || std::is_same_v<std::remove_cv_t<T>, unsigned char>
+    || std::is_same_v<std::remove_cv_t<T>, char> || std::is_same_v<std::remove_cv_t<T>, std::uint8_t>
+    || std::is_same_v<std::remove_cv_t<T>, std::int8_t>;
 
 /**
  * @brief Non-owning pointer and size wrapper with useful constructors defined. Used for reading into the buffer from
@@ -14,7 +20,7 @@ namespace cororing {
 class buffer_t {
 public:
     template <typename T>
-        requires(sizeof(T) == sizeof(std::byte) && std::is_trivial_v<T>)
+        requires is_byte<T>
     buffer_t(T* begin, std::size_t size)
         : begin_(reinterpret_cast<std::byte*>(begin))
         , size_(size)
@@ -22,11 +28,11 @@ public:
     }
 
     template <typename T>
-        requires(sizeof(typename T::value_type) == sizeof(std::byte) && std::is_trivial_v<typename T::value_type>)
+        requires is_byte<typename T::value_type>
     explicit buffer_t(T&& container) = delete;
 
     template <typename T>
-        requires(sizeof(typename T::value_type) == sizeof(std::byte) && std::is_trivial_v<typename T::value_type>)
+        requires is_byte<typename T::value_type>
     explicit buffer_t(T& container)
         : begin_(reinterpret_cast<std::byte*>(container.data()))
         , size_(container.size())
@@ -60,7 +66,7 @@ private:
 class const_buffer_t {
 public:
     template <typename T>
-        requires(sizeof(T) == sizeof(std::byte) && std::is_trivial_v<T>)
+        requires is_byte<T>
     const_buffer_t(const T* begin, std::size_t size)
         : begin_(reinterpret_cast<const std::byte*>(begin))
         , size_(size)
@@ -68,11 +74,11 @@ public:
     }
 
     template <typename T>
-        requires(sizeof(typename T::value_type) == sizeof(std::byte) && std::is_trivial_v<typename T::value_type>)
+        requires is_byte<typename T::value_type>
     explicit const_buffer_t(T&& container) = delete;
 
     template <typename T>
-        requires(sizeof(typename T::value_type) == sizeof(std::byte) && std::is_trivial_v<typename T::value_type>)
+        requires is_byte<typename T::value_type>
     explicit const_buffer_t(const T& container)
         : begin_(reinterpret_cast<const std::byte*>(container.data()))
         , size_(container.size())

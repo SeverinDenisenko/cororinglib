@@ -6,6 +6,7 @@
 #include <iostream>
 #include <ostream>
 #include <random>
+#include <thread>
 
 #include "cppcoro/sync_wait.hpp"
 #include "cppcoro/task.hpp"
@@ -73,8 +74,8 @@ cppcoro::task<cororing::perf_sampler> spam_strings(cororing::ring_t& ring, size_
 
 cppcoro::task<void> client(cororing::ring_t& ring)
 {
-    size_t request_size = 1024 * 1024;
-    size_t requests     = 10;
+    size_t request_size = 512;
+    size_t requests     = 1000;
 
     while (true) {
         cororing::perf_sampler sampler = co_await spam_strings(ring, requests, request_size);
@@ -97,9 +98,20 @@ cppcoro::task<void> poller(cororing::ring_t& ring)
 
 int main()
 {
-    cororing::ring_t ring(100);
+    std::vector<std::jthread> threads {};
+    size_t n_threads = 1000;
 
-    cppcoro::sync_wait(cppcoro::when_all_ready(client(ring), poller(ring)));
+    for (size_t i = 0; i < n_threads; ++i) {
+        threads.emplace_back([]() {
+            cororing::ring_t ring(100);
+
+            cppcoro::sync_wait(cppcoro::when_all_ready(client(ring), poller(ring)));
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
 
     return 0;
 }

@@ -11,6 +11,7 @@
 /** @file */
 
 struct io_uring;
+struct io_uring_sqe;
 
 namespace cororing {
 
@@ -44,12 +45,30 @@ public:
      * then queue_size.
      */
     ring_t(size_t queue_size, size_t queue_min_space_left = 0);
+
+    /**
+     * @brief Destroy the ring
+     * @warning Do not delete ring object if there are coroutines in suspended state waiting for responce!
+     */
     ~ring_t();
 
     ring_t(const ring_t& other)            = delete;
     ring_t& operator=(const ring_t& other) = delete;
 
-    ring_t(ring_t&& other)            = default;
+    /**
+     * @brief Move constructor
+     * @warning Do not move ring object if there are coroutines in suspended state waiting for response!
+     * @param other
+     */
+    ring_t(ring_t&& other) = default;
+
+    /**
+     * @brief Move assignment operator
+     *
+     * @param other
+     * @return ring_t&
+     * @warning Do not move ring object if there are coroutines in suspended state waiting for response!
+     */
     ring_t& operator=(ring_t&& other) = default;
 
     /**
@@ -105,6 +124,8 @@ public:
 
 private:
     void process();
+
+    struct io_uring_sqe* get_sqe();
 
     std::unique_ptr<struct io_uring> ring_ { nullptr };
     size_t queue_size_ {};

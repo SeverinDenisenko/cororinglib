@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <system_error>
 
 #include <liburing.h>
 #include <liburing/io_uring.h>
@@ -176,8 +177,11 @@ ring_t::~ring_t()
 void ring_t::process()
 {
     if (submissions_ > 0) {
-        io_uring_submit(ring_.get());
-        submissions_ = 0;
+        int rc = io_uring_submit(ring_.get());
+        if (rc < 0) {
+            throw std::system_error(-rc, std::system_category(), "io_uring_submit");
+        }
+        submissions_ -= rc;
     }
 }
 
@@ -206,8 +210,8 @@ bool ring_t::poll()
         if (!request->cancelled) {
             request->result = completion_queue->res;
             request->event.set();
-            request->release();
         }
+        request->release();
 
         io_uring_cqe_seen(ring_.get(), completion_queue);
 
@@ -225,6 +229,16 @@ bool ring_t::poll()
     return true;
 }
 
+struct io_uring_sqe* ring_t::get_sqe()
+{
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
+    while (!sqe) {
+        process();
+        sqe = io_uring_get_sqe(ring_.get());
+    }
+    return sqe;
+}
+
 cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
 {
     request_t* request = new request_t {};
@@ -235,8 +249,8 @@ cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
     request->iov[0].iov_base = buffer.data();
     request->iov[0].iov_len  = buffer.size();
 
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), 0);
+    struct io_uring_sqe* sqe = get_sqe();
+    io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), -1);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
 
@@ -284,8 +298,8 @@ cppcoro::task<int> ring_t::write(const_buffer_t buffer, int fd)
     request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
     request->iov[0].iov_len  = buffer.size();
 
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), 0);
+    struct io_uring_sqe* sqe = get_sqe();
+    io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), -1);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
 
@@ -310,7 +324,7 @@ cppcoro::task<int> ring_t::accept(int socket)
     request->iov[0].iov_base = 0;
     request->iov[0].iov_len  = 0;
 
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
+    struct io_uring_sqe* sqe = get_sqe();
     io_uring_prep_accept(sqe, socket, nullptr, nullptr, 0);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
@@ -336,7 +350,7 @@ cppcoro::task<int> ring_t::close(int fd)
     request->iov[0].iov_base = 0;
     request->iov[0].iov_len  = 0;
 
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
+    struct io_uring_sqe* sqe = get_sqe();
     io_uring_prep_close(sqe, fd);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();

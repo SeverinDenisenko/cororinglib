@@ -17,7 +17,7 @@
 static const std::string g_characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 std::random_device g_random_device;
 std::mt19937 g_generator(g_random_device());
-std::uniform_int_distribution<> g_distribution(0, g_characters.size() - 1);
+std::uniform_int_distribution<std::size_t> g_distribution(0, g_characters.size() - 1);
 
 std::string random_string(std::size_t length)
 {
@@ -99,7 +99,7 @@ cppcoro::task<void> poller(cororing::ring_t& ring)
 int main()
 {
     std::vector<std::jthread> threads {};
-    size_t n_threads = 1000;
+    size_t n_threads = 1;
 
     for (size_t i = 0; i < n_threads; ++i) {
         threads.emplace_back([]() {

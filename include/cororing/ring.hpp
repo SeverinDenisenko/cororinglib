@@ -24,14 +24,6 @@ namespace cororing {
 bool is_io_uring_supported();
 
 /**
- * @brief Get the io_uring capabilities on the current platform
- *
- * @return std::vector<const char*> Vector of named capabilities. If error was encountered during lookup, returns empty
- * vector.
- */
-std::vector<const char*> get_capabilities();
-
-/**
  * @brief io_uring coroutine wrapper
  */
 class ring_t {
@@ -48,7 +40,7 @@ public:
 
     /**
      * @brief Destroy the ring
-     * @warning Do not delete ring object if there are coroutines in suspended state waiting for responce!
+     * @warning Do not delete ring object if there are coroutines in suspended state waiting for response!
      */
     ~ring_t();
 
@@ -105,6 +97,33 @@ public:
      * @return cppcoro::task<int> Task yielding amount of bytes written if > 0 or error code if < 0
      */
     cppcoro::task<int> write(const_buffer_t buffer, int fd);
+
+    /**
+     * @brief Write to socket
+     * 
+     * @param buffer Non-owning reference to data
+     * @param socket Valid socket
+     * @return cppcoro::task<int> Task yielding amount of bytes written if > 0 or error code if < 0
+     */
+    cppcoro::task<int> send(const_buffer_t buffer, int socket);
+
+    /**
+     * @brief Read from socket
+     * 
+     * @param buffer Non-owning reference to data
+     * @param socket Valid socket
+     * @return cppcoro::task<int> 
+     */
+    cppcoro::task<int> receive(buffer_t buffer, int socket);
+
+    /**
+     * @brief Read exactly buffer.size() bytes from socket
+     *
+     * @param buffer Non-owning reference to data
+     * @param fd Valid file descriptor
+     * @return cppcoro::task<int> Task yielding amount of bytes read if > 0 or error code if < 0
+     */
+    cppcoro::task<int> receive_until_full(buffer_t buffer, int fd);
 
     /**
      * @brief Accept connection on socket

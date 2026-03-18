@@ -14,70 +14,18 @@
 
 #include <liburing.h>
 #include <liburing/io_uring.h>
+#include <sys/socket.h>
 
 namespace cororing {
 
 namespace {
-    const char* g_io_uring_op[] = {
-        "IORING_OP_NOP",
-        "IORING_OP_READV",
-        "IORING_OP_WRITEV",
-        "IORING_OP_FSYNC",
-        "IORING_OP_READ_FIXED",
-        "IORING_OP_WRITE_FIXED",
-        "IORING_OP_POLL_ADD",
-        "IORING_OP_POLL_REMOVE",
-        "IORING_OP_SYNC_FILE_RANGE",
-        "IORING_OP_SENDMSG",
-        "IORING_OP_RECVMSG",
-        "IORING_OP_TIMEOUT",
-        "IORING_OP_TIMEOUT_REMOVE",
-        "IORING_OP_ACCEPT",
-        "IORING_OP_ASYNC_CANCEL",
-        "IORING_OP_LINK_TIMEOUT",
-        "IORING_OP_CONNECT",
-        "IORING_OP_FALLOCATE",
-        "IORING_OP_OPENAT",
-        "IORING_OP_CLOSE",
-        "IORING_OP_FILES_UPDATE",
-        "IORING_OP_STATX",
-        "IORING_OP_READ",
-        "IORING_OP_WRITE",
-        "IORING_OP_FADVISE",
-        "IORING_OP_MADVISE",
-        "IORING_OP_SEND",
-        "IORING_OP_RECV",
-        "IORING_OP_OPENAT2",
-        "IORING_OP_EPOLL_CTL",
-        "IORING_OP_SPLICE",
-        "IORING_OP_PROVIDE_BUFFERS",
-        "IORING_OP_REMOVE_BUFFERS",
-        "IORING_OP_TEE",
-        "IORING_OP_SHUTDOWN",
-        "IORING_OP_RENAMEAT",
-        "IORING_OP_UNLINKAT",
-        "IORING_OP_MKDIRAT",
-        "IORING_OP_SYMLINKAT",
-        "IORING_OP_LINKAT",
-        "IORING_OP_MSG_RING",
-        "IORING_OP_FSETXATTR",
-        "IORING_OP_SETXATTR",
-        "IORING_OP_FGETXATTR",
-        "IORING_OP_GETXATTR",
-        "IORING_OP_SOCKET",
-        "IORING_OP_URING_CMD",
-        "IORING_OP_SEND_ZC",
-        "IORING_OP_SENDMSG_ZC",
-    };
-
-    constexpr size_t g_io_uring_ops = sizeof(g_io_uring_op) / sizeof(g_io_uring_op[0]);
-
     struct request_t {
         int refcount { 0 };
         bool cancelled { false };
         cppcoro::single_consumer_event event {};
-        int result { EINVAL };
+        int result { -EINVAL };
         std::array<iovec, 1> iov {};
+        struct msghdr msg { };
 
         void acquire()
         {
@@ -117,29 +65,6 @@ namespace {
         request_t* request_ { nullptr };
         bool disarmed_ { false };
     };
-}
-
-std::vector<const char*> get_capabilities()
-{
-    std::vector<const char*> result {};
-
-    struct io_uring_probe* probe = io_uring_get_probe();
-
-    if (!probe) {
-        return result;
-    }
-
-    size_t ops = std::min(size_t(IORING_OP_LAST), g_io_uring_ops);
-
-    for (size_t i = 0; i < ops; i++) {
-        if (io_uring_opcode_supported(probe, i)) {
-            result.push_back(g_io_uring_op[i]);
-        }
-    }
-
-    io_uring_free_probe(probe);
-
-    return result;
 }
 
 bool is_io_uring_supported()
@@ -321,11 +246,8 @@ cppcoro::task<int> ring_t::accept(int socket)
 
     cancellation_guard guard { request };
 
-    request->iov[0].iov_base = 0;
-    request->iov[0].iov_len  = 0;
-
     struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_accept(sqe, socket, nullptr, nullptr, 0);
+    io_uring_prep_accept(sqe, socket, nullptr, 0, 0);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
 
@@ -340,15 +262,90 @@ cppcoro::task<int> ring_t::accept(int socket)
     co_return result;
 }
 
-cppcoro::task<int> ring_t::close(int fd)
+cppcoro::task<int> ring_t::send(const_buffer_t buffer, int socket)
 {
     request_t* request = new request_t {};
     request->acquire();
 
     cancellation_guard guard { request };
 
-    request->iov[0].iov_base = 0;
-    request->iov[0].iov_len  = 0;
+    request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
+    request->iov[0].iov_len  = buffer.size();
+    request->msg.msg_iov     = request->iov.data();
+    request->msg.msg_iovlen  = request->iov.size();
+
+    struct io_uring_sqe* sqe = get_sqe();
+    io_uring_prep_sendmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
+    io_uring_sqe_set_data(sqe, request);
+    request->acquire();
+
+    submissions_ += 1;
+
+    co_await request->event;
+    int result = request->result;
+
+    guard.disarm();
+    request->release();
+
+    co_return result;
+}
+
+cppcoro::task<int> ring_t::receive(buffer_t buffer, int socket)
+{
+    request_t* request = new request_t {};
+    request->acquire();
+
+    cancellation_guard guard { request };
+
+    request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
+    request->iov[0].iov_len  = buffer.size();
+    request->msg.msg_iov     = request->iov.data();
+    request->msg.msg_iovlen  = request->iov.size();
+
+    struct io_uring_sqe* sqe = get_sqe();
+    io_uring_prep_recvmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
+    io_uring_sqe_set_data(sqe, request);
+    request->acquire();
+
+    submissions_ += 1;
+
+    co_await request->event;
+    int result = request->result;
+
+    guard.disarm();
+    request->release();
+
+    co_return result;
+}
+
+cppcoro::task<int> ring_t::receive_until_full(buffer_t buffer, int fd)
+{
+    int read = 0;
+
+    while (read < buffer.size()) {
+        buffer_t left(buffer.data() + read, buffer.size() - read);
+        int res = co_await this->receive(left, fd);
+
+        if (res <= 0) {
+            if (read == 0) {
+                co_return res;
+            } else {
+                co_return read;
+            }
+        }
+
+        read += res;
+    }
+
+    co_return read;
+}
+
+cppcoro::task<int> ring_t::close(int fd)
+{
+    request_t* request = new request_t {};
+    request->acquire();
+
+    cancellation_guard guard { request };
 
     struct io_uring_sqe* sqe = get_sqe();
     io_uring_prep_close(sqe, fd);

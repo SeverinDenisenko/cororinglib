@@ -17,7 +17,7 @@ cppcoro::task<void> handle_connection(cororing::ring_t& ring, int client_socket)
     std::vector<std::byte> buffer(100);
 
     while (true) {
-        int len = co_await ring.read(cororing::buffer_t(buffer), client_socket);
+        int len = co_await ring.receive(cororing::buffer_t(buffer), client_socket);
 
         if (len < 0) {
             std::cout << "Can't read from client." << std::endl;
@@ -32,7 +32,7 @@ cppcoro::task<void> handle_connection(cororing::ring_t& ring, int client_socket)
             co_return;
         }
 
-        len = co_await ring.write(cororing::const_buffer_t(buffer.data(), len), client_socket);
+        len = co_await ring.send(cororing::const_buffer_t(buffer.data(), len), client_socket);
 
         if (len <= 0) {
             std::cout << "Can't write to client." << std::endl;

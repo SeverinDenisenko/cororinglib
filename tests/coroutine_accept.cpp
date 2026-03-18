@@ -18,7 +18,7 @@ cppcoro::task<int> accept_connection(cororing::ring_t& ring, int listen_socket)
     co_return client_socket;
 }
 
-cppcoro::task<std::string> read_from_socket(cororing::ring_t& ring, int client_socket, int max_size)
+cppcoro::task<std::string> read_from_socket(cororing::ring_t& ring, int client_socket, size_t max_size)
 {
     std::vector<char> buffer(max_size);
 

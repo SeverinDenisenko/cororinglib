@@ -19,6 +19,16 @@
 namespace cororing {
 
 namespace {
+    struct io_uring_sqe* get_sqe(io_uring* ring)
+    {
+        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+        while (!sqe) {
+            io_uring_submit(ring);
+            sqe = io_uring_get_sqe(ring);
+        }
+        return sqe;
+    }
+
     struct request_t {
         int refcount { 0 };
         bool cancelled { false };
@@ -154,28 +164,17 @@ bool ring_t::poll()
     return true;
 }
 
-struct io_uring_sqe* ring_t::get_sqe()
-{
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring_.get());
-    while (!sqe) {
-        process();
-        sqe = io_uring_get_sqe(ring_.get());
-    }
-    return sqe;
-}
-
-cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
+template <typename PrepareSqe>
+cppcoro::task<int> ring_t::submit(PrepareSqe prepare_sqe)
 {
     request_t* request = new request_t {};
     request->acquire();
 
     cancellation_guard guard { request };
 
-    request->iov[0].iov_base = buffer.data();
-    request->iov[0].iov_len  = buffer.size();
+    struct io_uring_sqe* sqe = get_sqe(ring_.get());
+    prepare_sqe(sqe, request);
 
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), -1);
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
 
@@ -189,6 +188,15 @@ cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
     request->release();
 
     co_return result;
+}
+
+cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
+{
+    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+        request->iov[0].iov_base = buffer.data();
+        request->iov[0].iov_len  = buffer.size();
+        io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), -1);
+    });
 }
 
 cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int fd)
@@ -215,107 +223,38 @@ cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int fd)
 
 cppcoro::task<int> ring_t::write(const_buffer_t buffer, int fd)
 {
-    request_t* request = new request_t {};
-    request->acquire();
-
-    cancellation_guard guard { request };
-
-    request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
-    request->iov[0].iov_len  = buffer.size();
-
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), -1);
-    io_uring_sqe_set_data(sqe, request);
-    request->acquire();
-
-    submissions_ += 1;
-
-    co_await request->event;
-    int result = request->result;
-
-    guard.disarm();
-    request->release();
-
-    co_return result;
+    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+        request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
+        request->iov[0].iov_len  = buffer.size();
+        io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), -1);
+    });
 }
 
 cppcoro::task<int> ring_t::accept(int socket)
 {
-    request_t* request = new request_t {};
-    request->acquire();
-
-    cancellation_guard guard { request };
-
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_accept(sqe, socket, nullptr, 0, 0);
-    io_uring_sqe_set_data(sqe, request);
-    request->acquire();
-
-    submissions_ += 1;
-
-    co_await request->event;
-    int result = request->result;
-
-    guard.disarm();
-    request->release();
-
-    co_return result;
+    return submit([&](struct io_uring_sqe* sqe, request_t*) { io_uring_prep_accept(sqe, socket, nullptr, 0, 0); });
 }
 
 cppcoro::task<int> ring_t::send(const_buffer_t buffer, int socket)
 {
-    request_t* request = new request_t {};
-    request->acquire();
-
-    cancellation_guard guard { request };
-
-    request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
-    request->iov[0].iov_len  = buffer.size();
-    request->msg.msg_iov     = request->iov.data();
-    request->msg.msg_iovlen  = request->iov.size();
-
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_sendmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
-    io_uring_sqe_set_data(sqe, request);
-    request->acquire();
-
-    submissions_ += 1;
-
-    co_await request->event;
-    int result = request->result;
-
-    guard.disarm();
-    request->release();
-
-    co_return result;
+    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+        request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
+        request->iov[0].iov_len  = buffer.size();
+        request->msg.msg_iov     = request->iov.data();
+        request->msg.msg_iovlen  = request->iov.size();
+        io_uring_prep_sendmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
+    });
 }
 
 cppcoro::task<int> ring_t::receive(buffer_t buffer, int socket)
 {
-    request_t* request = new request_t {};
-    request->acquire();
-
-    cancellation_guard guard { request };
-
-    request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
-    request->iov[0].iov_len  = buffer.size();
-    request->msg.msg_iov     = request->iov.data();
-    request->msg.msg_iovlen  = request->iov.size();
-
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_recvmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
-    io_uring_sqe_set_data(sqe, request);
-    request->acquire();
-
-    submissions_ += 1;
-
-    co_await request->event;
-    int result = request->result;
-
-    guard.disarm();
-    request->release();
-
-    co_return result;
+    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+        request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
+        request->iov[0].iov_len  = buffer.size();
+        request->msg.msg_iov     = request->iov.data();
+        request->msg.msg_iovlen  = request->iov.size();
+        io_uring_prep_recvmsg(sqe, socket, &request->msg, MSG_NOSIGNAL);
+    });
 }
 
 cppcoro::task<int> ring_t::receive_until_full(buffer_t buffer, int fd)
@@ -342,25 +281,7 @@ cppcoro::task<int> ring_t::receive_until_full(buffer_t buffer, int fd)
 
 cppcoro::task<int> ring_t::close(int fd)
 {
-    request_t* request = new request_t {};
-    request->acquire();
-
-    cancellation_guard guard { request };
-
-    struct io_uring_sqe* sqe = get_sqe();
-    io_uring_prep_close(sqe, fd);
-    io_uring_sqe_set_data(sqe, request);
-    request->acquire();
-
-    submissions_ += 1;
-
-    co_await request->event;
-    int result = request->result;
-
-    guard.disarm();
-    request->release();
-
-    co_return result;
+    return submit([&](struct io_uring_sqe* sqe, request_t*) { io_uring_prep_close(sqe, fd); });
 }
 
 }

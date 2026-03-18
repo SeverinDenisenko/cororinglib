@@ -100,7 +100,7 @@ public:
 
     /**
      * @brief Write to socket
-     * 
+     *
      * @param buffer Non-owning reference to data
      * @param socket Valid socket
      * @return cppcoro::task<int> Task yielding amount of bytes written if > 0 or error code if < 0
@@ -109,10 +109,10 @@ public:
 
     /**
      * @brief Read from socket
-     * 
+     *
      * @param buffer Non-owning reference to data
      * @param socket Valid socket
-     * @return cppcoro::task<int> 
+     * @return cppcoro::task<int>
      */
     cppcoro::task<int> receive(buffer_t buffer, int socket);
 
@@ -144,12 +144,13 @@ public:
 private:
     void process();
 
-    struct io_uring_sqe* get_sqe();
+    template <typename PrepareSqe>
+    cppcoro::task<int> submit(PrepareSqe prepare_sqe);
 
     std::unique_ptr<struct io_uring> ring_ { nullptr };
-    size_t queue_size_ {};
-    size_t queue_min_space_left_ {};
-    size_t submissions_ {};
+    size_t queue_size_ { };
+    size_t queue_min_space_left_ { };
+    size_t submissions_ { };
 };
 
 }

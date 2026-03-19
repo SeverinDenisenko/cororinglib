@@ -3,6 +3,18 @@
 
 using namespace cororing;
 
+SIMPLE_TEST(ip_address)
+{
+    {
+        ipv4_address address = ipv4_address::from_string("127.0.0.1");
+        ASSERT_EQ(ipv4_address::to_string(address), "127.0.0.1");
+    }
+    {
+        ipv6_address address = ipv6_address::from_string("::1");
+        ASSERT_EQ(ipv6_address::to_string(address), "::1");
+    }
+}
+
 SIMPLE_TEST(create_sockets)
 {
     {

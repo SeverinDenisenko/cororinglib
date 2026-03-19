@@ -1,6 +1,7 @@
 #include "cororing/sockets.hpp"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <system_error>
 
@@ -124,6 +125,48 @@ namespace {
             throw_error_code(errno);
         }
     }
+}
+
+std::string ipv4_address::to_string(const ipv4_address& addr)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", addr.bytes_[0], addr.bytes_[1], addr.bytes_[2], addr.bytes_[3]);
+    return buf;
+}
+
+ipv4_address ipv4_address::from_string(std::string_view str) noexcept
+{
+    ipv4_address addr;
+
+    int ret = inet_pton(AF_INET, std::data(str), addr.bytes_);
+    if (ret < 0) {
+        throw_error_code(ret);
+    }
+
+    return addr;
+}
+
+std::string ipv6_address::to_string(const ipv6_address& addr)
+{
+    char buf[46];
+
+    if (inet_ntop(AF_INET6, addr.bytes_, buf, sizeof(buf)) == nullptr) {
+        return {};
+    }
+
+    return buf;
+}
+
+ipv6_address ipv6_address::from_string(std::string_view str) noexcept
+{
+    ipv6_address addr;
+
+    int ret = inet_pton(AF_INET6, std::data(str), addr.bytes_);
+    if (ret < 0) {
+        throw_error_code(ret);
+    }
+
+    return addr;
 }
 
 socket_t create_socket(socket_protocol_t protocol, socket_ip_version_t ip_vesrion)

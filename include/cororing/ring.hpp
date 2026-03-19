@@ -3,10 +3,11 @@
 #include "cppcoro/task.hpp"
 
 #include "cororing/buffer.hpp"
+#include "cororing/sockets.hpp"
 
 #include <cstddef>
 #include <memory>
-#include <vector>
+#include <tuple>
 
 /** @file */
 
@@ -129,9 +130,9 @@ public:
      * @brief Accept connection on socket
      *
      * @param socket Valid file descriptor
-     * @return cppcoro::task<int> Task yielding client socket if > 0 or error code if < 0
+     * @return cppcoro::task<std::tuple<int, ip_address>> Task yielding client socket and peer address
      */
-    cppcoro::task<int> accept(int socket);
+    cppcoro::task<std::tuple<int, ip_address>> accept(int socket);
 
     /**
      * @brief Close file descriptor

@@ -11,8 +11,9 @@
 
 cppcoro::task<int> accept_connection(cororing::ring_t& ring, int listen_socket)
 {
-    int client_socket = co_await ring.accept(listen_socket);
+    auto [client_socket, address] = co_await ring.accept(listen_socket);
 
+    ASSERT_EQ(cororing::ipv4_address::to_string(std::get<cororing::ipv4_address>(address)), "127.0.0.1");
     ASSERT_TRUE(client_socket > 0);
 
     co_return client_socket;

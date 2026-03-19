@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <string_view>
+#include <variant>
 
 /** @file */
 
@@ -18,9 +21,53 @@ enum class socket_ip_version_t {
     ipv6,
 };
 
+class ipv4_address {
+public:
+    ipv4_address() = default;
+
+    constexpr const std::uint8_t* bytes() const
+    {
+        return bytes_;
+    }
+
+    constexpr std::uint8_t* bytes()
+    {
+        return bytes_;
+    }
+
+    static std::string to_string(const ipv4_address& addr);
+    static ipv4_address from_string(std::string_view str) noexcept;
+
+private:
+    alignas(std::uint32_t) std::uint8_t bytes_[4];
+};
+
+class ipv6_address {
+public:
+    ipv6_address() = default;
+
+    constexpr const std::uint8_t* bytes() const
+    {
+        return bytes_;
+    }
+
+    constexpr std::uint8_t* bytes()
+    {
+        return bytes_;
+    }
+
+    static std::string to_string(const ipv6_address& addr);
+    static ipv6_address from_string(std::string_view str) noexcept;
+
+private:
+    alignas(std::uint64_t) std::uint8_t bytes_[16];
+};
+
+using ip_address = std::variant<ipv4_address, ipv6_address>;
+
 /**
  * @brief Create a socket
- * 
+ *
  * @param protocol socket_protocol_t::tcp or socket_protocol_t::udp
  * @param ip_vesrion socket_ip_version_t::ipv4 or socket_ip_version_t::ipv6
  * @return socket_t valid socket
@@ -30,7 +77,7 @@ socket_t create_socket(socket_protocol_t protocol, socket_ip_version_t ip_vesrio
 
 /**
  * @brief bind socket to address
- * 
+ *
  * @param socket valid socket
  * @param ip_vesrion socket_ip_version_t::ipv4 or socket_ip_version_t::ipv6
  * @param port 16 bit unsigned int representing local port to bind to
@@ -42,7 +89,7 @@ void bind_socket(socket_t socket, socket_ip_version_t ip_vesrion, uint16_t port,
 
 /**
  * @brief Connect to remote
- * 
+ *
  * @param socket valid socket
  * @param ip_vesrion socket_ip_version_t::ipv4 or socket_ip_version_t::ipv6
  * @param port 16 bit unsigned int representing port on remote to connect to
@@ -54,7 +101,7 @@ void connect_socket(socket_t socket, socket_ip_version_t ip_vesrion, uint16_t po
 
 /**
  * @brief Listen tcp socket
- * 
+ *
  * @param socket valid tcp socket
  * @param backlog backlog
  * @throws std::system_error if error occured in any part of creating and setuping the socket

@@ -49,7 +49,7 @@ cppcoro::task<void> linstner(cororing::ring_t& ring)
         cororing::socket_protocol_t::tcp, cororing::socket_ip_version_t::ipv4, g_port, "0.0.0.0", 100);
 
     while (true) {
-        int client_socket = co_await ring.accept(listen_socket);
+        auto [client_socket, address] = co_await ring.accept(listen_socket);
 
         if (client_socket < 0) {
             std::cout << "Can't accept client." << std::endl;

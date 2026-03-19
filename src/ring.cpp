@@ -1,5 +1,6 @@
 #include "cororing/ring.hpp"
 
+#include "cororing/sockets.hpp"
 #include "cppcoro/single_consumer_event.hpp"
 
 #include <array>
@@ -11,9 +12,11 @@
 #include <memory>
 #include <stdexcept>
 #include <system_error>
+#include <tuple>
 
 #include <liburing.h>
 #include <liburing/io_uring.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 
 namespace cororing {
@@ -36,6 +39,8 @@ namespace {
         int result { -EINVAL };
         std::array<iovec, 1> iov {};
         struct msghdr msg { };
+        struct sockaddr_storage addr { };
+        socklen_t addrlen { sizeof(struct sockaddr_storage) };
 
         void acquire()
         {
@@ -174,7 +179,6 @@ cppcoro::task<int> ring_t::submit(PrepareSqe prepare_sqe)
 
     struct io_uring_sqe* sqe = get_sqe(ring_.get());
     prepare_sqe(sqe, request);
-
     io_uring_sqe_set_data(sqe, request);
     request->acquire();
 
@@ -192,7 +196,7 @@ cppcoro::task<int> ring_t::submit(PrepareSqe prepare_sqe)
 
 cppcoro::task<int> ring_t::read(buffer_t buffer, int fd)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+    return submit([buffer, fd](struct io_uring_sqe* sqe, request_t* request) mutable {
         request->iov[0].iov_base = buffer.data();
         request->iov[0].iov_len  = buffer.size();
         io_uring_prep_readv(sqe, fd, request->iov.data(), request->iov.size(), -1);
@@ -223,21 +227,57 @@ cppcoro::task<int> ring_t::read_until_full(buffer_t buffer, int fd)
 
 cppcoro::task<int> ring_t::write(const_buffer_t buffer, int fd)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+    return submit([buffer, fd](struct io_uring_sqe* sqe, request_t* request) mutable {
         request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
         request->iov[0].iov_len  = buffer.size();
         io_uring_prep_writev(sqe, fd, request->iov.data(), request->iov.size(), -1);
     });
 }
 
-cppcoro::task<int> ring_t::accept(int socket)
+cppcoro::task<std::tuple<int, ip_address>> ring_t::accept(int socket)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t*) { io_uring_prep_accept(sqe, socket, nullptr, 0, 0); });
+    request_t* request = new request_t {};
+    request->acquire();
+
+    cancellation_guard guard { request };
+
+    struct io_uring_sqe* sqe = get_sqe(ring_.get());
+    io_uring_prep_accept(sqe, socket, (sockaddr*)&request->addr, &request->addrlen, 0);
+
+    io_uring_sqe_set_data(sqe, request);
+    request->acquire();
+
+    submissions_ += 1;
+
+    co_await request->event;
+
+    int client_socket = request->result;
+    ip_address address {};
+
+    if (client_socket >= 0) {
+        auto* sa = (struct sockaddr*)&request->addr;
+        if (sa->sa_family == AF_INET) {
+            auto* addr4 = (struct sockaddr_in*)&request->addr;
+            ipv4_address ip {};
+            std::memcpy(ip.bytes(), &addr4->sin_addr, 4);
+            address = ip;
+        } else if (sa->sa_family == AF_INET6) {
+            auto* addr6 = (struct sockaddr_in6*)&request->addr;
+            ipv6_address ip {};
+            std::memcpy(ip.bytes(), &addr6->sin6_addr, 16);
+            address = ip;
+        }
+    }
+
+    guard.disarm();
+    request->release();
+
+    co_return std::make_tuple(client_socket, address);
 }
 
 cppcoro::task<int> ring_t::send(const_buffer_t buffer, int socket)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+    return submit([buffer, socket](struct io_uring_sqe* sqe, request_t* request) mutable {
         request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
         request->iov[0].iov_len  = buffer.size();
         request->msg.msg_iov     = request->iov.data();
@@ -248,7 +288,7 @@ cppcoro::task<int> ring_t::send(const_buffer_t buffer, int socket)
 
 cppcoro::task<int> ring_t::receive(buffer_t buffer, int socket)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t* request) {
+    return submit([buffer, socket](struct io_uring_sqe* sqe, request_t* request) mutable {
         request->iov[0].iov_base = const_cast<std::byte*>(buffer.data());
         request->iov[0].iov_len  = buffer.size();
         request->msg.msg_iov     = request->iov.data();
@@ -281,7 +321,6 @@ cppcoro::task<int> ring_t::receive_until_full(buffer_t buffer, int fd)
 
 cppcoro::task<int> ring_t::close(int fd)
 {
-    return submit([&](struct io_uring_sqe* sqe, request_t*) { io_uring_prep_close(sqe, fd); });
+    return submit([fd](struct io_uring_sqe* sqe, request_t*) mutable { io_uring_prep_close(sqe, fd); });
 }
-
 }
